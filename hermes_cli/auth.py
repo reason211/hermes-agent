@@ -2566,73 +2566,16 @@ def _nous_device_code_login(
         )
     except AuthError as exc:
         if exc.code == "subscription_required":
-            auth_state["subscription_required"] = True
-            return auth_state
+            portal_url = auth_state.get(
+                "portal_base_url", DEFAULT_NOUS_PORTAL_URL
+            ).rstrip("/")
+            print()
+            print("Your Nous Portal account does not have an active subscription.")
+            print(f"  Subscribe here: {portal_url}/billing")
+            print()
+            print("After subscribing, run `hermes model` again to finish setup.")
+            raise SystemExit(1)
         raise
-
-
-SUBSCRIPTION_POLL_TIMEOUT_SECONDS = 300
-SUBSCRIPTION_POLL_INTERVAL_SECONDS = 10
-
-
-def _wait_for_subscription(
-    auth_state: Dict[str, Any],
-    *,
-    timeout_seconds: int = SUBSCRIPTION_POLL_TIMEOUT_SECONDS,
-    poll_interval: int = SUBSCRIPTION_POLL_INTERVAL_SECONDS,
-    min_key_ttl_seconds: int = 5 * 60,
-) -> Dict[str, Any]:
-    """Poll for subscription activation after successful device auth.
-
-    Mirrors the device-code polling UX: prints a banner with the subscription
-    URL, then checks every ``poll_interval`` seconds whether the agent key
-    mint succeeds.  Returns the updated auth state on success, raises
-    SystemExit on timeout or Ctrl+C.
-    """
-    portal_url = auth_state.get("portal_base_url", DEFAULT_NOUS_PORTAL_URL).rstrip("/")
-    pricing_url = f"{portal_url}/pricing"
-
-    print()
-    print("Your Nous Portal account does not have an active subscription.")
-    print()
-    print(f"  Subscribe here: {pricing_url}")
-    print()
-    print("Waiting for subscription activation... (Ctrl+C to cancel)")
-
-    deadline = time.time() + max(1, timeout_seconds)
-    next_check = time.time()
-
-    while time.time() < deadline:
-        remaining = int(deadline - time.time())
-        mins, secs = divmod(max(0, remaining), 60)
-        print(f"  Checking... ({mins}:{secs:02d} remaining)", end="\r", flush=True)
-
-        if time.time() >= next_check:
-            next_check = time.time() + poll_interval
-            try:
-                updated = refresh_nous_oauth_from_state(
-                    auth_state,
-                    min_key_ttl_seconds=min_key_ttl_seconds,
-                    timeout_seconds=15.0,
-                    force_refresh=False,
-                    force_mint=True,
-                )
-                if updated.get("agent_key"):
-                    print()
-                    print("Subscription activated!")
-                    return updated
-            except AuthError as exc:
-                if exc.code == "subscription_required":
-                    pass
-                else:
-                    raise
-
-        time.sleep(1)
-
-    print()
-    print("Timed out waiting for subscription activation.")
-    print(f"Subscribe at {pricing_url}, then run `hermes model` to continue setup.")
-    raise SystemExit(1)
 
 
 def _login_nous(args, pconfig: ProviderConfig) -> None:
@@ -2647,8 +2590,8 @@ def _login_nous(args, pconfig: ProviderConfig) -> None:
 
     try:
         auth_state = _nous_device_code_login(
-            portal_base_url=getattr(args, "portal_url", None) or pconfig.portal_base_url,
-            inference_base_url=getattr(args, "inference_url", None) or pconfig.inference_base_url,
+            portal_base_url=getattr(args, "portal_url", None),
+            inference_base_url=getattr(args, "inference_url", None),
             client_id=getattr(args, "client_id", None) or pconfig.client_id,
             scope=getattr(args, "scope", None) or pconfig.scope,
             open_browser=not getattr(args, "no_browser", False),
@@ -2657,12 +2600,6 @@ def _login_nous(args, pconfig: ProviderConfig) -> None:
             ca_bundle=ca_bundle,
             min_key_ttl_seconds=5 * 60,
         )
-
-        if auth_state.get("subscription_required"):
-            auth_state = _wait_for_subscription(
-                auth_state,
-                min_key_ttl_seconds=5 * 60,
-            )
 
         inference_base_url = auth_state["inference_base_url"]
         verify: bool | str = False if insecure else (ca_bundle if ca_bundle else True)
