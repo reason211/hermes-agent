@@ -1283,6 +1283,41 @@ class TelegramAdapter(BasePlatformAdapter):
                     e,
                     exc_info=True,
                 )
+
+    async def on_processing_start(self, event) -> None:
+        """React with 👀 emoji to acknowledge message receipt instantly."""
+        if not self._bot or not event.message_id:
+            return
+        try:
+            from telegram import ReactionTypeEmoji
+            await self._bot.set_message_reaction(
+                chat_id=int(event.source.chat_id),
+                message_id=int(event.message_id),
+                reaction=[ReactionTypeEmoji("👀")],
+            )
+        except Exception as e:
+            logger.debug(
+                "[%s] Failed to set acknowledgment reaction: %s",
+                self.name, e,
+            )
+
+    async def on_processing_complete(self, event, success: bool) -> None:
+        """Swap reaction to ✅ on success or ❌ on failure."""
+        if not self._bot or not event.message_id:
+            return
+        try:
+            from telegram import ReactionTypeEmoji
+            emoji = "✅" if success else "❌"
+            await self._bot.set_message_reaction(
+                chat_id=int(event.source.chat_id),
+                message_id=int(event.message_id),
+                reaction=[ReactionTypeEmoji(emoji)],
+            )
+        except Exception as e:
+            logger.debug(
+                "[%s] Failed to set completion reaction: %s",
+                self.name, e,
+            )
     
     async def get_chat_info(self, chat_id: str) -> Dict[str, Any]:
         """Get information about a Telegram chat."""
